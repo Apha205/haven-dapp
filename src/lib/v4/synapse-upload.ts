@@ -95,7 +95,11 @@ export async function getUploadSynapse(
   try {
     uploadSynapse = await Synapse.create({
       transport,
-      chain: getSynapseChain(BASE_MAINNET_CHAIN_ID),
+      // `@filoz/synapse-sdk` 2.x still resolves a nested `@filoz/synapse-core`
+      // 0.10.3, so `getChain` (direct 0.11.0) and `Synapse.create` (0.10.3)
+      // disagree on `FilecoinChain` at the type level only — the chain object
+      // is identical at runtime. Cast just this boundary.
+      chain: getSynapseChain(BASE_MAINNET_CHAIN_ID) as unknown as Parameters<typeof Synapse.create>[0]['chain'],
       account: wallet.account.address as `0x${string}`,
       withCDN: true,
       source: 'haven-dapp-v4',

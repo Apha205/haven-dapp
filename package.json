@@ -35,6 +35,7 @@
   "dependencies": {
     "@arkiv-network/sdk": "^0.8.1",
     "@base-org/account": "2.5.13",
+    "@filoz/synapse-core": "0.11.0",
     "@filoz/synapse-sdk": "2.0.2",
     "@icp-sdk/core": "6.1.1",
     "@icp-sdk/vetkeys": "0.7.0",
