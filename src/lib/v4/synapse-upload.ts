@@ -99,7 +99,7 @@ export async function getUploadSynapse(
       // 0.10.3, so `getChain` (direct 0.11.0) and `Synapse.create` (0.10.3)
       // disagree on `FilecoinChain` at the type level only — the chain object
       // is identical at runtime. Cast just this boundary.
-      chain: getSynapseChain(BASE_MAINNET_CHAIN_ID) as unknown as Parameters<typeof Synapse.create>[0]['chain'],
+      chain: getSynapseChain(BASE_MAINNET_CHAIN_ID) as unknown as NonNullable<Parameters<typeof Synapse.create>[0]['chain']>,
       account: wallet.account.address as `0x${string}`,
       withCDN: true,
       source: 'haven-dapp-v4',
