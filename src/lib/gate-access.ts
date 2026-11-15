@@ -17,7 +17,7 @@
  */
 
 import { createPublicClient, http, type PublicClient } from 'viem'
-import { eq, or } from '@arkiv-network/sdk/query'
+import { asc, eq, or } from '@arkiv-network/sdk/query'
 import type { PublicArkivClient } from '@arkiv-network/sdk'
 import type { Transport, Chain } from 'viem'
 import type { TokenGate } from '@/types/attestation'
@@ -108,19 +108,21 @@ export function gatesFromAttributes(records: Record<string, unknown>[]): TokenGa
  */
 export async function discoverGates(client: ArkivClient): Promise<TokenGate[]> {
   const records: Record<string, unknown>[] = []
-  let cursor: string | undefined
+  // SDK 1.x pages by offset (stable order on $key), not cursor.
+  let offset = 0
   for (let page = 0; page < MAX_DISCOVERY_PAGES; page++) {
     const builder = client
       .select({ $key: true, $attributes: true })
       .where([or(...GATE_GROUPS.map((g) => eq('grp', g)))])
+      .orderBy(asc('$key'))
       .limit(PAGE_SIZE)
-    if (cursor) builder.cursor(cursor)
+    if (offset > 0) builder.offset(offset)
     const result = await builder.fetch()
     for (const entity of result.entities) {
       records.push(toAttributeRecord((entity as { $attributes?: unknown }).$attributes))
     }
-    cursor = result.cursor ?? undefined
-    if (!cursor || result.entities.length === 0) break
+    offset += result.entities.length
+    if (result.entities.length < PAGE_SIZE) break
   }
   return gatesFromAttributes(records)
 }

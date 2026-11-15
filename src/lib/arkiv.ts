@@ -18,7 +18,7 @@ import {
 } from '@arkiv-network/sdk'
 import { http, type Hex, type Transport, type Chain } from 'viem'
 import { rabdi } from '@arkiv-network/sdk/chains'
-import { eq } from '@arkiv-network/sdk/query'
+import { asc, eq, type Expression } from '@arkiv-network/sdk/query'
 import { toChainId } from './gate-chains'
 import type { TokenGate } from '@/types/attestation'
 import { toAttributeRecord } from './arkiv-attrs'
@@ -170,11 +170,15 @@ export async function queryEntitiesByOwner(
     // Upcast to SelectArg so overload resolution picks the dynamic-selection
     // path (FullEntity rows) instead of distributing ProjectedEntity over the
     // EntitySelection union. Safe: EntitySelection is a member of SelectArg.
-    const builder = client
+    // SDK 1.x pages by offset, not cursor — a legacy cursor string carries
+    // the decimal offset it pointed at.
+    const offset = cursorOffset(cursor)
+    let builder = client
       .select(selection as SelectArg)
       .ownedBy(ownerAddress.toLowerCase() as Hex)
+      .orderBy(asc('$key'))
       .limit(maxResults)
-    if (cursor) builder.cursor(cursor)
+    if (offset > 0) builder = builder.offset(offset)
     const result = await builder.fetch()
 
     // Transform SDK Entity to our ArkivEntity format
@@ -199,11 +203,12 @@ export async function queryEntitiesByGate(
 ): Promise<ArkivEntity[]> {
   const { maxResults = 50, cursor } = options
   const chainId = toChainId(gate.chain)
-  const where = [eq('grp', 'haven.video.full'), eq('gate_token', gate.tokenAddress)]
+  const where: Expression[] = [eq('grp', 'haven.video.full'), eq('gate_token', gate.tokenAddress)]
   if (chainId !== undefined) where.push(eq('gate_chain', chainId))
   try {
-    const builder = client.select().where(where).limit(maxResults)
-    if (cursor) builder.cursor(cursor)
+    const offset = cursorOffset(cursor)
+    let builder = client.select().where(where).orderBy(asc('$key')).limit(maxResults)
+    if (offset > 0) builder = builder.offset(offset)
     const result = await builder.fetch()
     return result.entities.map(transformEntity)
   } catch (error) {
@@ -286,9 +291,9 @@ export async function getAllEntitiesByOwner(
   maxResults: number = 1000
 ): Promise<ArkivEntity[]> {
   const allEntities: ArkivEntity[] = []
-  let cursor: string | undefined
+  let offset = 0
   let hasMore = true
-  
+
   while (hasMore && allEntities.length < maxResults) {
     const pageSize = Math.min(50, maxResults - allEntities.length)
 
@@ -296,14 +301,15 @@ export async function getAllEntitiesByOwner(
       const builder = client
         .select()
         .ownedBy(ownerAddress.toLowerCase() as Hex)
+        .orderBy(asc('$key'))
         .limit(pageSize)
-      if (cursor) builder.cursor(cursor)
+      if (offset > 0) builder.offset(offset)
       const result = await builder.fetch()
       const entities = result.entities.map(transformEntity)
-      
+
       allEntities.push(...entities)
-      cursor = result.cursor
-      hasMore = !!result.cursor && entities.length > 0
+      offset += entities.length
+      hasMore = entities.length === pageSize
     } catch (error) {
       throw new ArkivError(
         error instanceof Error ? error.message : 'Failed to fetch all entities',
@@ -343,6 +349,13 @@ export async function getLatestEntityByOwner(
   }
 }
 
+/** Legacy cursor strings carry the decimal offset the page started at. */
+function cursorOffset(cursor?: string): number {
+  if (!cursor) return 0
+  const n = Number.parseInt(cursor, 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -377,8 +390,8 @@ interface RawSdkEntity {
  * @param entity - The SDK Entity
  * @returns Transformed ArkivEntity
  */
-function transformEntity(entity: Entity): ArkivEntity {
-  const raw = entity as unknown as RawSdkEntity
+function transformEntity(entity: unknown): ArkivEntity {
+  const raw = entity as RawSdkEntity
 
   // 1.x payload arrives as a tagged bytes value ({ type: "bytes", value: "0x…" }).
   let payload = ''

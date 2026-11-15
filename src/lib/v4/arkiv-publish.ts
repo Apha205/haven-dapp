@@ -43,6 +43,7 @@ import {
   type QueryOptions,
 } from '@arkiv-network/sdk'
 import { ExpirationTime } from '@arkiv-network/sdk/utils'
+import type { CreateEntityValues } from '@arkiv-network/sdk/schema'
 import { HAVEN_SCHEMA } from './arkiv-schema'
 import type { Chain as HavenChain } from 'haven-aol'
 import { VALID_CHAINS, buildGateMetadataV4 } from 'haven-aol'
@@ -259,7 +260,7 @@ export async function ensureDripSeries(
   }
 
   const body = buildDripSeriesBody(args)
-  const values: Record<string, unknown> = { ...toAttributeInputs(body.attributes), content_type: 'application/json', payload: jsonToPayload(body.payloadJson) }
+  const values: CreateEntityValues<typeof HAVEN_SCHEMA> = { ...toAttributeInputs(body.attributes), content_type: 'application/json', payload: jsonToPayload(body.payloadJson) }
   const { entityKey } = await store.createEntity(HAVEN_SCHEMA, values, {
     expiration: ExpirationTime.fromWeeks(DRIP_SERIES_LIFETIME_WEEKS),
   })
@@ -483,7 +484,7 @@ export async function publishDripStage(
     })
     const seriesRef =
       args.seriesRef ??
-      (await ensureDripSeries(arkivClient, {
+      (await ensureDripSeries(arkivClient as unknown as SeriesStore, {
         gate,
         dripId,
         dripTotal: plan.dripTotal,
@@ -501,7 +502,7 @@ export async function publishDripStage(
       epoch: publishEpoch,
     })
 
-    const partValues: Record<string, unknown> = { ...toAttributeInputs(body.attributes), content_type: 'application/json', payload: jsonToPayload(body.payloadJson) }
+    const partValues: CreateEntityValues<typeof HAVEN_SCHEMA> = { ...toAttributeInputs(body.attributes), content_type: 'application/json', payload: jsonToPayload(body.payloadJson) }
     const { entityKey } = await arkivClient.createEntity(HAVEN_SCHEMA, partValues, {
       expiration: ExpirationTime.fromWeeks(DRIP_PART_LIFETIME_WEEKS),
     })
@@ -558,7 +559,7 @@ export async function publishDripChunks(args: PublishDripArgs): Promise<string[]
     transport: custom(provider as never),
     account: wallet.account.address as `0x${string}`,
   })
-  const seriesRef = await ensureDripSeries(arkivClient, {
+  const seriesRef = await ensureDripSeries(arkivClient as unknown as SeriesStore, {
     gate,
     dripId,
     dripTotal: plans.length,

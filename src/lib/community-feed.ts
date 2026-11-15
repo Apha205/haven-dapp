@@ -24,7 +24,7 @@ import {
   type TokenGate,
 } from '@/types/attestation'
 import type { PublicArkivClient } from '@arkiv-network/sdk'
-import { eq } from '@arkiv-network/sdk/query'
+import { eq, type Expression } from '@arkiv-network/sdk/query'
 import { toAttributeRecord, unwrapArkivValue } from './arkiv-attrs'
 import type { Transport, Chain } from 'viem'
 
@@ -114,7 +114,7 @@ export async function fetchCommunityFeedForToken(
   limit: number = 20
 ): Promise<CommunityVideo[]> {
   const chainId = toChainId(gate.chain)
-  const where = [eq('grp', 'haven.video.full'), eq('gate_token', gate.tokenAddress)]
+  const where: Expression[] = [eq('grp', 'haven.video.full'), eq('gate_token', gate.tokenAddress)]
   if (chainId !== undefined) where.push(eq('gate_chain', chainId))
   // SDK 0.8 has no server-side ordering — sort newest-first below.
   const result = await client
