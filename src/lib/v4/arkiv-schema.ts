@@ -12,9 +12,9 @@
  * values: `str`/`i32`/`u256`) so type-exact queries hit entities written
  * by any Haven surface — see `lib/arkiv-attrs`.
  */
-import { bytes, defineSchema, i32, str, u256 } from '@arkiv-network/sdk/schema'
+import { bytes, defineSchema, i32, str, u256, type Schema } from '@arkiv-network/sdk/schema'
 
-export const HAVEN_SCHEMA = defineSchema({
+export const HAVEN_SCHEMA: Schema = defineSchema({
   grp: str().indexed(),
   title: str().optional(),
   gate_type: i32(),
