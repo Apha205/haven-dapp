@@ -25,7 +25,7 @@ import {
 } from '@/types/attestation'
 import type { PublicArkivClient } from '@arkiv-network/sdk'
 import { eq } from '@arkiv-network/sdk/query'
-import { toAttributeRecord } from './arkiv-attrs'
+import { toAttributeRecord, unwrapArkivValue } from './arkiv-attrs'
 import type { Transport, Chain } from 'viem'
 
 // ============================================================================
@@ -68,7 +68,7 @@ export async function discoverUserCommunities(
   walletAddress: string
 ): Promise<TokenGate[]> {
   const result = await client
-    .select({ key: true, attributes: true })
+    .select({ $key: true, $attributes: true })
     .where([eq('grp', 'haven.video.full')])
     .ownedBy(walletAddress.toLowerCase() as `0x${string}`)
     .limit(200)
@@ -77,7 +77,7 @@ export async function discoverUserCommunities(
   const gateMap = new Map<string, TokenGate>()
 
   for (const entity of result.entities) {
-    const attrs = toAttributeRecord(entity.attributes)
+    const attrs = toAttributeRecord((entity as { $attributes?: unknown }).$attributes)
     if (Object.keys(attrs).length === 0) continue
 
     const gateToken = attrs['gate_token'] as string | undefined
@@ -124,10 +124,16 @@ export async function fetchCommunityFeedForToken(
     .fetch()
 
   const videos = result.entities.map((entity) => {
-    // Entity payload is Uint8Array — decode to base64 for parseEntityPayload
+    // Entity payload is a tagged `bytes` column in SDK 1.x — unwrap it, then
+    // decode to base64 for parseEntityPayload
     let payloadStr = ''
-    if (entity.payload) {
-      const bytes = new Uint8Array(entity.payload)
+    const rawPayload = unwrapArkivValue((entity as { payload?: unknown }).payload)
+    if (rawPayload instanceof Uint8Array || typeof rawPayload === 'string') {
+      const bytes = rawPayload instanceof Uint8Array
+        ? rawPayload
+        : typeof rawPayload === 'string' && rawPayload.startsWith('0x')
+          ? Uint8Array.from(rawPayload.slice(2).match(/../g) ?? [], (h) => parseInt(h, 16))
+          : new TextEncoder().encode(rawPayload)
       const binary = bytes.reduce((acc, byte) => acc + String.fromCharCode(byte), '')
       payloadStr = typeof window !== 'undefined' ? btoa(binary) : Buffer.from(bytes).toString('base64')
     }
@@ -135,7 +141,8 @@ export async function fetchCommunityFeedForToken(
     const payload = parseEntityPayload<Record<string, unknown>>(payloadStr) || {}
     const attestation = (payload.attn as Attestation | undefined) || null
 
-    const attrs = toAttributeRecord(entity.attributes)
+    const row = entity as unknown as Record<string, unknown>
+    const attrs = toAttributeRecord(row.$attributes ?? row.attributes)
     const getAttr = (key: string): string | number | undefined =>
       attrs[key] as string | number | undefined
 
@@ -148,14 +155,14 @@ export async function fetchCommunityFeedForToken(
     const contentGate = parseAnyGateMetadata(payload.gate)
 
     return {
-      id: entity.key,
+      id: String(row.$key ?? row.key),
       title: (getAttr('title') as string) || 'Untitled',
-      owner: (entity.owner || '').toLowerCase(),
-      creatorAddress: (entity.creator || entity.owner || '').toLowerCase(),
+      owner: String(row.$owner ?? row.owner ?? '').toLowerCase(),
+      creatorAddress: String(row.$creator ?? row.creator ?? row.$owner ?? row.owner ?? '').toLowerCase(),
       gateToken: gate.tokenAddress,
       gateChain: entityGateChain,
       gateThreshold: entityGateThreshold ?? gate.threshold,
-      createdAtBlock: entity.createdAt ? Number(entity.createdAt) : 0,
+      createdAtBlock: row.$createdAt !== undefined ? Number(row.$createdAt) : 0,
       // Gate presence decides encryption — 2.0 carries no is_encrypted flag.
       isEncrypted: contentGate !== null,
       cidHash: entitySha256Ct,

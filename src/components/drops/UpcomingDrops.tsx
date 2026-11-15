@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react'
 import { and, eq } from '@arkiv-network/sdk/query'
 import { normalizeCid } from '@/lib/ipfs'
-import { createArkivClient, parseEntityPayload } from '@/lib/arkiv'
-import { toAttributeRecord } from '@/lib/arkiv-attrs'
+import { createArkivClient } from '@/lib/arkiv'
+import { toAttributeRecord, unwrapArkivValue } from '@/lib/arkiv-attrs'
 import { parseDripInfo, selectLiveStages, type DripSeriesMeta } from '@/lib/parse-arkiv-video'
 import { toNetworkKey } from '@/lib/gate-chains'
 import { formatUsdCompact } from '@/lib/v4/drip-plan'
@@ -107,17 +107,17 @@ export function UpcomingDrops() {
         //
         // Bare eq() values map to str/i32 — the same types writers emit.
         const result = await client
-          .select({ key: true, attributes: true })
+          .select({ $key: true, $attributes: true })
           .where([and(eq('grp', 'haven.video.drip.part'), eq('gate_type', 4))])
           .limit(24)
           .fetch()
         const entities = result.entities.filter(
-          (e) => toAttributeRecord(e.attributes)['grp'] === 'haven.video.drip.part'
+          (e) => toAttributeRecord((e as { $attributes?: unknown }).$attributes)['grp'] === 'haven.video.drip.part'
         )
         if (entities.length === 0) throw new Error('no drips')
         const parts = entities.map((e) => {
-          const attrs = toAttributeRecord(e.attributes)
-          return { key: String(e.key), attrs }
+          const attrs = toAttributeRecord((e as { $attributes?: unknown }).$attributes)
+          return { key: String((e as { $key?: unknown }).$key), attrs }
         })
         // One series fetch per distinct drip_id.
         const dripIds = [...new Set(parts.map((p) => String(p.attrs.drip_id ?? '')))].filter(Boolean)
@@ -126,19 +126,24 @@ export function UpcomingDrops() {
           dripIds.map(async (dripId) => {
             try {
               const s = await client
-                .select({ key: true, attributes: true, payload: true })
+                .select({ $key: true, $attributes: true, payload: true })
                 .where([eq('drip_id', dripId)])
                 .limit(5)
                 .fetch()
               const se = s.entities.find(
-                (e) => toAttributeRecord(e.attributes)['grp'] === 'haven.video.drip.series'
+                (e) => toAttributeRecord((e as { $attributes?: unknown }).$attributes)['grp'] === 'haven.video.drip.series'
               )
               if (!se) return
-              const sattrs = toAttributeRecord(se.attributes)
+              const sattrs = toAttributeRecord((se as { $attributes?: unknown }).$attributes)
               let spayload: Record<string, unknown> = {}
               try {
-                if (typeof se.payload === 'string') spayload = parseEntityPayload<Record<string, unknown>>(se.payload) ?? {}
-                else if (se.payload instanceof Uint8Array) spayload = JSON.parse(Buffer.from(se.payload).toString('utf-8') || '{}')
+                const raw = unwrapArkivValue((se as { payload?: unknown }).payload)
+                const bytes = raw instanceof Uint8Array
+                  ? raw
+                  : typeof raw === 'string' && raw.startsWith('0x')
+                    ? Uint8Array.from(raw.slice(2).match(/../g) ?? [], (h) => parseInt(h, 16))
+                    : undefined
+                if (bytes) spayload = JSON.parse(Buffer.from(bytes).toString('utf-8') || '{}')
               } catch {}
               seriesById.set(dripId, {
                 title: String(sattrs.title ?? ''),
@@ -185,7 +190,7 @@ export function UpcomingDrops() {
   return (
     <div data-testid="upcoming-drops">
       {isDemo && drops !== null && (
-        <p className="label text-fg-5 px-1 pb-2 whitespace-normal leading-relaxed">Demo preview — Arkiv L3 (tiramisu) is indexing haven drips</p>
+        <p className="label text-fg-5 px-1 pb-2 whitespace-normal leading-relaxed">Demo preview — Arkiv L3 (rabdi) is indexing haven drips</p>
       )}
       <div className="grid gap-3 max-h-[520px] overflow-y-auto pr-1">
         {items.map((item) => (

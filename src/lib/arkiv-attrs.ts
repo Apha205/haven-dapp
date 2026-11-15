@@ -1,15 +1,16 @@
 /**
- * Arkiv attribute-shape helpers (SDK 0.8.x).
+ * Arkiv attribute-shape helpers (SDK 1.x).
  *
- * SDK 0.8 reads attributes back as a map of *tagged* values
- * (`Record<string, { type, value }>` — see `@arkiv-network/sdk/attr`),
- * while 0.7 used `{ key, value: string|number }[]`. Writers still pass
- * *bare* values (string → `str`, number → `i32`), which keeps the exact
- * wire types 0.7 wrote — and keeps CLI-written entities (Python SDK,
- * `str`/`int` only) query-compatible with dapp-written ones. Do NOT
- * switch writers to tagged constructors (`addr()`/`bytes32()`/`key()`)
- * unilaterally: comparisons are type-exact, so that would fragment
- * discovery by writer until every surface cuts over together.
+ * SDK 1.x reads attributes back as a map of *tagged* values
+ * (`Record<string, { type, value }>` — see `@arkiv-network/sdk/schema`),
+ * while the legacy wire used `{ key, value: string|number }[]`. Writers
+ * still pass *bare* values (string → `str`, number → `i32`, bigint →
+ * `u256`), which keeps the exact wire types earlier SDKs wrote — and
+ * keeps CLI-written entities (Python SDK, `str`/`int` only)
+ * query-compatible with dapp-written ones. Do NOT switch writers to
+ * tagged constructors (`addr()`/`key()`/…) unilaterally: comparisons are
+ * type-exact, so that would fragment discovery by writer until every
+ * surface cuts over together.
  *
  * @module lib/arkiv-attrs
  */
@@ -55,7 +56,7 @@ export function unwrapArkivValue(raw: unknown): unknown {
 /**
  * Normalize entity attributes to a plain record.
  *
- * Accepts the SDK 0.8 map (`Record<name, tagged>`), the legacy 0.7
+ * Accepts the SDK 1.x map (`Record<name, tagged>`), the legacy
  * array (`[{ key, value }]`), or `undefined` — always returns a fresh
  * `Record<string, unknown>` with values unwrapped.
  */
@@ -93,7 +94,7 @@ export interface LegacyAttributeEntry {
 
 /**
  * Publisher adapter: legacy `[{ key, value }]` builders → SDK 0.8
- * bare-value map. Bare values keep the exact wire types 0.7 wrote
+ * bare-value map. Bare values keep the exact wire types earlier SDKs wrote
  * (`str`/`i32`) — see the module note before reaching for tagged
  * constructors.
  */
@@ -105,4 +106,13 @@ export function toAttributeInputs(
     out[key] = value
   }
   return out
+}
+
+/**
+ * JSON record → `bytes` column value (UTF-8). Replaces the SDK 0.8
+ * `jsonToPayload` util, which 1.x no longer exports — the payload is an
+ * ordinary `bytes` attribute now.
+ */
+export function jsonToPayload(value: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(value))
 }

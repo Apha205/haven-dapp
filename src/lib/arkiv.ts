@@ -12,13 +12,12 @@
 import {
   createPublicClient,
   type Entity,
-  type EntitySelection,
   type SelectArg,
   type PublicArkivClient,
   NoEntityFoundError,
 } from '@arkiv-network/sdk'
 import { http, type Hex, type Transport, type Chain } from 'viem'
-import { tiramisu } from '@arkiv-network/sdk/chains'
+import { rabdi } from '@arkiv-network/sdk/chains'
 import { eq } from '@arkiv-network/sdk/query'
 import { toChainId } from './gate-chains'
 import type { TokenGate } from '@/types/attestation'
@@ -33,7 +32,7 @@ import {
 // ============================================================================
 
 const ARKIV_RPC_URL = process.env.NEXT_PUBLIC_ARKIV_RPC_URL ||
-  'https://rpc.tiramisu.db-chain.testnet.arkiv.network'
+  'https://rpc.rabdi.db-chain.testnet.arkiv.network'
 
 // ============================================================================
 // Types
@@ -104,7 +103,7 @@ export class ArkivError extends Error {
  * This client is optimized for browser environments and read-only operations.
  * For read-only queries, no private key is required.
  * 
- * @returns A PublicArkivClient instance configured for the Tiramisu chain
+ * @returns A PublicArkivClient instance configured for the Rabdi chain
  * 
  * @example
  * ```typescript
@@ -117,7 +116,8 @@ export function createArkivClient(): PublicArkivClient<Transport, Chain | undefi
   const transport = http(ARKIV_RPC_URL)
   
   return createPublicClient({
-    chain: tiramisu,
+    // rabdi() requires an access key; "" selects the public endpoint.
+    chain: rabdi({ accessKey: '' }),
     transport,
   }) as PublicArkivClient<Transport, Chain | undefined, undefined>
 }
@@ -152,17 +152,18 @@ export async function queryEntitiesByOwner(
     includeAttributes = true,
   } = options
 
+  // 1.x flat selection: $-prefixed system fields plus attribute columns.
   // Identity fields are always selected (cheap, and transformEntity needs
   // owner + creation block); payload/attributes honor the include flags so
   // list rows never over-fetch sealed bytes.
-  const selection: EntitySelection = {
-    key: true,
-    owner: true,
-    creator: true,
-    createdAt: true,
-    contentType: true,
+  const selection: Record<string, unknown> = {
+    $key: true,
+    $owner: true,
+    $creator: true,
+    $createdAt: true,
+    $attributes: true,
   }
-  if (includeAttributes) selection.attributes = true
+  if (includeAttributes) selection.$attributes = true
   if (includePayload) selection.payload = true
 
   try {
@@ -226,7 +227,8 @@ export async function getEntity(
   entityKey: string
 ): Promise<ArkivEntity | null> {
   try {
-    const entity: Entity = await client.getEntity(entityKey as `0x${string}`)
+    // 1.x getEntity returns a flat FullEntity row ($-prefixed fields).
+    const entity = await client.getEntity(entityKey as `0x${string}`) as unknown as Entity
 
     if (!entity) {
       return null
@@ -346,19 +348,27 @@ export async function getLatestEntityByOwner(
 // ============================================================================
 
 /**
- * Minimal structural view of an SDK entity — satisfied by the SDK 0.8
- * `Entity`/`FullEntity` (and tolerant of legacy/test shapes).
+ * Minimal structural view of an SDK entity — satisfied by the SDK 1.x
+ * flat row (`$key`/`$owner`/`$createdAt`/`$attributes`/`payload`) and
+ * tolerant of legacy/test shapes.
  */
 interface RawSdkEntity {
   key?: unknown
+  $key?: unknown
   owner?: unknown
-  payload?: unknown
-  contentType?: unknown
-  attributes?: unknown
-  /** SDK 0.8 creation block. */
+  $owner?: unknown
+  creator?: unknown
+  $creator?: unknown
   createdAt?: unknown
-  /** Legacy 0.7 creation block field. */
+  $createdAt?: unknown
   createdAtBlock?: unknown
+  expiresAt?: unknown
+  $expiresAt?: unknown
+  contentType?: unknown
+  content_type?: unknown
+  attributes?: unknown
+  $attributes?: unknown
+  payload?: unknown
 }
 
 /**
@@ -370,27 +380,42 @@ interface RawSdkEntity {
 function transformEntity(entity: Entity): ArkivEntity {
   const raw = entity as unknown as RawSdkEntity
 
-  // Convert payload from Uint8Array to base64 string
+  // 1.x payload arrives as a tagged bytes value ({ type: "bytes", value: "0x…" }).
   let payload = ''
-  if (raw.payload instanceof Uint8Array) {
-    const bytes = new Uint8Array(raw.payload)
+  const payloadRaw = raw.payload as { type?: string; value?: unknown } | Uint8Array | string | undefined
+  if (payloadRaw instanceof Uint8Array) {
+    const bytes = new Uint8Array(payloadRaw)
     const binary = bytes.reduce((acc, byte) => acc + String.fromCharCode(byte), '')
     payload = typeof window !== 'undefined'
       ? btoa(binary)
       : Buffer.from(bytes).toString('base64')
-  } else if (typeof raw.payload === 'string') {
-    payload = raw.payload
+  } else if (typeof payloadRaw === 'string') {
+    payload = payloadRaw
+  } else if (payloadRaw && typeof payloadRaw === 'object' && 'value' in payloadRaw) {
+    const v = payloadRaw.value
+    if (typeof v === 'string' && /^0x[0-9a-fA-F]*$/.test(v) && v.length % 2 === 0) {
+      const hex = v.slice(2)
+      const bytes = Uint8Array.from({ length: hex.length / 2 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16))
+      const binary = bytes.reduce((acc, byte) => acc + String.fromCharCode(byte), '')
+      payload = typeof window !== 'undefined'
+        ? btoa(binary)
+        : Buffer.from(bytes).toString('base64')
+    }
   }
 
-  // Normalize the SDK 0.8 tagged map (or a legacy array) to a record
-  const attributes = toAttributeRecord(raw.attributes)
+  // Normalize the 1.x flat row (or a legacy nested/array shape) to a record.
+  const attributes = toAttributeRecord(raw.$attributes ?? raw.attributes)
 
-  // Get content type from entity or attributes
-  const contentType = (typeof raw.contentType === 'string' && raw.contentType) ||
+  // Get content type from entity or attributes.
+  const contentType = (typeof raw.content_type === 'string' && raw.content_type) ||
+    (typeof raw.contentType === 'string' && raw.contentType) ||
+    (attributes.content_type as string) ||
     (attributes.contentType as string) ||
     'application/octet-stream'
 
-  const createdRaw = (raw.createdAt ?? raw.createdAtBlock) as
+  const keyRaw = raw.$key ?? raw.key
+  const ownerRaw = raw.$owner ?? raw.owner ?? raw.$creator ?? raw.creator
+  const createdRaw = (raw.$createdAt ?? raw.createdAt ?? raw.createdAtBlock) as
     | string
     | number
     | bigint
@@ -399,8 +424,8 @@ function transformEntity(entity: Entity): ArkivEntity {
   const createdAtBlock = parseCreatedAtBlock(createdRaw)
 
   return {
-    key: typeof raw.key === 'string' ? raw.key : String(raw.key ?? ''),
-    owner: typeof raw.owner === 'string' ? raw.owner : '',
+    key: typeof keyRaw === 'string' ? keyRaw : String(keyRaw ?? ''),
+    owner: typeof ownerRaw === 'string' ? ownerRaw : '',
     attributes,
     payload,
     content_type: contentType,

@@ -111,13 +111,13 @@ export async function discoverGates(client: ArkivClient): Promise<TokenGate[]> {
   let cursor: string | undefined
   for (let page = 0; page < MAX_DISCOVERY_PAGES; page++) {
     const builder = client
-      .select({ key: true, attributes: true })
+      .select({ $key: true, $attributes: true })
       .where([or(...GATE_GROUPS.map((g) => eq('grp', g)))])
       .limit(PAGE_SIZE)
     if (cursor) builder.cursor(cursor)
     const result = await builder.fetch()
     for (const entity of result.entities) {
-      records.push(toAttributeRecord(entity.attributes))
+      records.push(toAttributeRecord((entity as { $attributes?: unknown }).$attributes))
     }
     cursor = result.cursor ?? undefined
     if (!cursor || result.entities.length === 0) break

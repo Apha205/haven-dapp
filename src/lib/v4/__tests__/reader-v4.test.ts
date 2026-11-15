@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { parseArkivEntityToVideo, parseDripInfo } from '../../parse-arkiv-video'
 import type { ArkivEntity } from '../../arkiv'
 import { evaluateDripUnlock } from '@/hooks/useMarketCap'
-import { jsonToPayload } from '@arkiv-network/sdk/utils'
+import { jsonToPayload } from '../../arkiv-attrs'
 
 function entityWith(
   attrs: Record<string, string | number>,
